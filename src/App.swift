@@ -71,18 +71,11 @@ struct ContentView: View {
                isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(alert ?? "") }
-        .confirmationDialog(
-            "Delete this password?",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            presenting: pendingDelete
-        ) { item in
-            Button("Delete “\(item.service.isEmpty ? item.label : item.service)”", role: .destructive) {
+        .sheet(item: $pendingDelete) { item in
+            DeleteSheet(item: item) {
                 do { try Keychain.delete(item); flash("Deleted"); load() }
                 catch { alert = error.localizedDescription }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("\(item.account)\nThis can’t be undone.")
         }
     }
 
@@ -198,9 +191,19 @@ struct ContentView: View {
     }
 
     private func copy(_ pw: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(pw, forType: .string)
-        flash("Copied to clipboard")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(pw, forType: .string)
+        // Marks the item so well-behaved clipboard managers don't record it.
+        pb.setString(pw, forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        let stamp = pb.changeCount
+        flash("Copied — clears in 60s")
+        // Auto-clear after 60s, but only if nothing else has since taken the clipboard.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            if NSPasteboard.general.changeCount == stamp {
+                NSPasteboard.general.clearContents()
+            }
+        }
     }
 
     private func flash(_ msg: String) {
@@ -239,7 +242,11 @@ struct AddSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            field("Password", "secret value", $password)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Password").font(.caption).foregroundStyle(.secondary)
+                SecureField("secret value", text: $password).textFieldStyle(.roundedBorder)
+            }
+
             field("Note (optional)", "description", $note)
 
             HStack {
@@ -266,5 +273,54 @@ struct AddSheet: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
             TextField(placeholder, text: text).textFieldStyle(.roundedBorder)
         }
+    }
+}
+
+// MARK: - Delete sheet (type-to-confirm)
+
+struct DeleteSheet: View {
+    let item: KItem
+    var onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var typed = ""
+
+    private var name: String { item.service.isEmpty ? item.label : item.service }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Delete password").font(.title3).fontWeight(.semibold)
+            Text("This permanently removes the item from your keychain. It can’t be undone.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).fontWeight(.medium).lineLimit(1)
+                Text(item.account.isEmpty ? "—" : item.account)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Type the name to confirm:").font(.caption).foregroundStyle(.secondary)
+                Text(name)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled).foregroundStyle(.secondary)
+                TextField("", text: $typed)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { if typed == name { onDelete(); dismiss() } }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Delete") { onDelete(); dismiss() }
+                    .buttonStyle(.borderedProminent).tint(.red)
+                    .disabled(typed != name)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
     }
 }
