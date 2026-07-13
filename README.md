@@ -1,6 +1,6 @@
 # Keychain Manager
 
-A tiny, native macOS app for browsing and editing your login keychain — so you don't have to fight the `security` CLI. Built with SwiftUI, talks to the keychain through Apple's Security framework directly (no shelling out, no network, no dependencies).
+A tiny, native macOS app for browsing and editing your login keychain — plus a read-only view of your launchd jobs — so you don't have to fight the `security` and `launchctl` CLIs. Built with SwiftUI; keychain access goes straight through Apple's Security framework. No network, no dependencies.
 
 <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="macOS 13+"> <img src="https://img.shields.io/badge/Swift-5-orange" alt="Swift 5">
 
@@ -26,7 +26,7 @@ Requires the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
 # compile the binary into an app bundle
-swiftc -swift-version 5 -O src/Keychain.swift src/App.swift \
+swiftc -swift-version 5 -O src/*.swift \
   -o "Keychain Manager.app/Contents/MacOS/KeychainManager"
 
 # ad-hoc sign (stable local identity so "Always Allow" grants persist)
@@ -58,5 +58,5 @@ iconutil -c icns /tmp/AppIcon.iconset -o "Keychain Manager.app/Contents/Resource
 
 - Not sandboxed; runs with your user rights over your login keychain (necessary for a keychain manager). Read the source — it's short.
 - Ad-hoc signed, not notarized. Rebuilding changes the signature, so macOS re-prompts for "Always Allow" grants.
-- Copied passwords sit on the clipboard until overwritten (and may sync via Universal Clipboard) — a general risk of copying any secret.
+- Copied passwords are auto-cleared from the clipboard after 60s (unless you copy something else first) and marked concealed so well-behaved clipboard managers skip them — but any app can read the clipboard while it's set, and it may sync via Universal Clipboard. A general risk of copying any secret.
 - Deletes are permanent; be careful with app-managed items like `… Safe Storage`.
