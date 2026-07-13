@@ -1,0 +1,8 @@
+# Build artifacts — regenerated from src/ and tools/
+Keychain Manager.app/
+*.icns
+*.iconset/
+build/
+
+# macOS
+.DS_Store
