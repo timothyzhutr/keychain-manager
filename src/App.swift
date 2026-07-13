@@ -5,10 +5,23 @@ import AppKit
 struct KeychainManagerApp: App {
     var body: some Scene {
         WindowGroup("Keychain Manager") {
-            ContentView()
+            RootView()
         }
-        .defaultSize(width: 760, height: 560)
+        .defaultSize(width: 760, height: 580)
         .commands { CommandGroup(replacing: .newItem) {} }
+    }
+}
+
+struct RootView: View {
+    var body: some View {
+        TabView {
+            ContentView()
+                .tabItem { Label("Keychain", systemImage: "key.fill") }
+            LaunchdView()
+                .tabItem { Label("launchd", systemImage: "gearshape.2.fill") }
+        }
+        .frame(minWidth: 620, minHeight: 460)
+        .padding(.top, 6)
     }
 }
 

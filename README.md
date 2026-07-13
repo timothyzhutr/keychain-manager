@@ -6,11 +6,17 @@ A tiny, native macOS app for browsing and editing your login keychain — so you
 
 ## Features
 
+**Keychain tab**
 - List generic + internet passwords from your login (and data-protection) keychain
 - Live search and a Generic / Internet filter
-- **Reveal** a secret on demand, then one-click **Copy**
+- **Reveal** a secret on demand, then one-click **Copy** (masked entry; clipboard auto-clears after 60s)
 - **Add** a generic password (creates or updates in place)
-- **Delete** with a confirmation dialog
+- **Delete** with type-the-name confirmation
+
+**launchd tab**
+- Read-only view of your user (GUI) launchd domain via `launchctl list`
+- Running / All / Third-party filters, live search, PID and last-exit status
+- Never loads, unloads, or kills anything — display only
 
 Revealing a password created by another app triggers macOS's own authorization dialog — this app can't bypass the OS's gate on your secrets. Plaintext is held in memory only; nothing is written to disk or logged.
 
@@ -43,7 +49,8 @@ iconutil -c icns /tmp/AppIcon.iconset -o "Keychain Manager.app/Contents/Resource
 ## Layout
 
 - `src/Keychain.swift` — Security-framework wrapper (list / reveal / add / delete)
-- `src/App.swift` — SwiftUI UI
+- `src/App.swift` — SwiftUI UI (tabbed shell + Keychain tab)
+- `src/Launchd.swift` — launchd tab (`launchctl list`, read-only)
 - `tools/icongen.swift` — app-icon generator
 - `keychain_manager.py` — earlier zero-dependency browser-based version (Python stdlib + `security` CLI); kept as an alternative
 
