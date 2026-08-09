@@ -4,6 +4,7 @@ import Security
 /// One keychain entry (generic or internet password).
 struct KItem: Identifiable, Hashable {
     let id = UUID()
+    let persistentRef: Data
     let isInternet: Bool
     let service: String   // svce for generic, srvr for internet
     let account: String
@@ -34,19 +35,24 @@ enum Keychain {
             let query: [String: Any] = [
                 kSecClass as String: isInternet ? kSecClassInternetPassword : kSecClassGenericPassword,
                 kSecReturnAttributes as String: true,
+                kSecReturnPersistentRef as String: true,
                 kSecMatchLimit as String: kSecMatchLimitAll,
             ]
             var result: CFTypeRef?
             let status = SecItemCopyMatching(query as CFDictionary, &result)
             guard status == errSecSuccess, let arr = result as? [[String: Any]] else { continue }
             for d in arr {
+                guard let persistentRef = d[kSecValuePersistentRef as String] as? Data else {
+                    continue
+                }
                 let account = d[kSecAttrAccount as String] as? String ?? ""
                 let service = (isInternet
                     ? d[kSecAttrServer as String] as? String
                     : d[kSecAttrService as String] as? String) ?? ""
                 let label = d[kSecAttrLabel as String] as? String
                     ?? (service.isEmpty ? account : service)
-                items.append(KItem(isInternet: isInternet, service: service,
+                items.append(KItem(persistentRef: persistentRef,
+                                   isInternet: isInternet, service: service,
                                    account: account, label: label))
             }
         }
@@ -59,14 +65,7 @@ enum Keychain {
     /// Reads the secret. macOS shows its own authorization dialog for items this app
     /// doesn't yet own — that prompt is the OS, not us, and cannot be bypassed here.
     static func reveal(_ item: KItem) throws -> String {
-        var query: [String: Any] = [
-            kSecClass as String: item.isInternet ? kSecClassInternetPassword : kSecClassGenericPassword,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        let serviceKey = item.isInternet ? kSecAttrServer : kSecAttrService
-        if !item.service.isEmpty { query[serviceKey as String] = item.service }
-        if !item.account.isEmpty { query[kSecAttrAccount as String] = item.account }
+        let query = revealQuery(for: item)
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -74,6 +73,14 @@ enum Keychain {
             throw KError.status(status)
         }
         return String(data: data, encoding: .utf8) ?? "(binary, \(data.count) bytes)"
+    }
+
+    static func revealQuery(for item: KItem) -> [String: Any] {
+        [
+            kSecValuePersistentRef as String: item.persistentRef,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
     }
 
     /// Adds a generic password; updates in place if service+account already exist.
@@ -104,16 +111,16 @@ enum Keychain {
     }
 
     static func delete(_ item: KItem) throws {
-        var query: [String: Any] = [
-            kSecClass as String: item.isInternet ? kSecClassInternetPassword : kSecClassGenericPassword
-        ]
-        let serviceKey = item.isInternet ? kSecAttrServer : kSecAttrService
-        if !item.service.isEmpty { query[serviceKey as String] = item.service }
-        if !item.account.isEmpty { query[kSecAttrAccount as String] = item.account }
-
+        let query = deleteQuery(for: item)
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {
             throw KError.status(status)
         }
+    }
+
+    static func deleteQuery(for item: KItem) -> [String: Any] {
+        [
+            kSecValuePersistentRef as String: item.persistentRef,
+        ]
     }
 }

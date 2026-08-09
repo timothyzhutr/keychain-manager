@@ -25,17 +25,22 @@ Revealing a password created by another app triggers macOS's own authorization d
 Requires the Xcode Command Line Tools (`xcode-select --install`).
 
 ```bash
-# compile the binary into an app bundle
-swiftc -swift-version 5 -O src/*.swift \
-  -o "Keychain Manager.app/Contents/MacOS/KeychainManager"
+# build a universal (Apple silicon + Intel) app with its icon and local signature
+./scripts/build.sh
 
-# ad-hoc sign (stable local identity so "Always Allow" grants persist)
-codesign --force --sign - "Keychain Manager.app"
-
-open "Keychain Manager.app"
+open "build/Keychain Manager.app"
 ```
 
-The `Keychain Manager.app` bundle, its `Info.plist`, and the icon are build artifacts. A minimal bundle (`Contents/Info.plist` + `Contents/MacOS/` + `Contents/Resources/`) is all that's needed; see the build steps and `tools/icongen.swift` to regenerate the icon.
+The app is written to `build/Keychain Manager.app`. Pass a different output
+directory as the first argument if needed. The script targets macOS 13+, builds
+both architectures, generates the icon, and applies a local ad-hoc signature so
+"Always Allow" keychain grants persist until the app is rebuilt.
+
+Run the regression and bundle checks with:
+
+```bash
+./scripts/test.sh
+```
 
 ## Icon
 
@@ -43,7 +48,8 @@ The `Keychain Manager.app` bundle, its `Info.plist`, and the icon are build arti
 
 ```bash
 swiftc -O tools/icongen.swift -o /tmp/icongen && /tmp/icongen /tmp/AppIcon.iconset
-iconutil -c icns /tmp/AppIcon.iconset -o "Keychain Manager.app/Contents/Resources/AppIcon.icns"
+mkdir -p "build/Keychain Manager.app/Contents/Resources"
+iconutil -c icns /tmp/AppIcon.iconset -o "build/Keychain Manager.app/Contents/Resources/AppIcon.icns"
 ```
 
 ## Layout
