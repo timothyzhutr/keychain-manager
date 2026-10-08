@@ -64,5 +64,6 @@ iconutil -c icns /tmp/AppIcon.iconset -o "build/Keychain Manager.app/Contents/Re
 
 - Not sandboxed; runs with your user rights over your login keychain (necessary for a keychain manager). Read the source — it's short.
 - Ad-hoc signed, not notarized. Rebuilding changes the signature, so macOS re-prompts for "Always Allow" grants.
+- Signed with the hardened runtime, so other processes can't inject code into the app (e.g. via `DYLD_INSERT_LIBRARIES`) and use its keychain grants.
 - Copied passwords are auto-cleared from the clipboard after 60s (unless you copy something else first) and marked concealed so well-behaved clipboard managers skip them — but any app can read the clipboard while it's set, and it may sync via Universal Clipboard. A general risk of copying any secret.
 - Deletes are permanent; be careful with app-managed items like `… Safe Storage`.

@@ -36,7 +36,9 @@ iconutil -c icns "$work_root/AppIcon.iconset" \
 
 # Local ad-hoc signing gives macOS a repeatable identity for keychain access.
 # It is intentionally not Developer ID distribution signing.
-codesign --force --sign - "$app"
+# Hardened runtime blocks DYLD_INSERT_LIBRARIES-style injection, which would
+# otherwise let any same-user process run code with this app's keychain grants.
+codesign --force --sign - --options runtime "$app"
 
 plutil -lint "$contents/Info.plist" >/dev/null
 codesign --verify --deep --strict "$app"

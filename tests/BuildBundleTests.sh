@@ -21,4 +21,12 @@ architectures="$(lipo -archs "$binary")"
 [[ " $architectures " == *" x86_64 "* ]]
 
 codesign --verify --deep --strict --verbose=2 "$app"
+
+for arch in arm64 x86_64; do
+    signature="$(codesign --display --verbose=2 --arch "$arch" "$app" 2>&1)"
+    if ! grep -Eq 'flags=0x[0-9a-f]+\([^)]*runtime' <<<"$signature"; then
+        echo "FAIL: $arch slice is not signed with hardened runtime" >&2
+        exit 1
+    fi
+done
 echo "BuildBundleTests passed"
