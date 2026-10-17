@@ -3,9 +3,12 @@ import AppKit
 
 @main
 struct KeychainManagerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup("Keychain Manager") {
             RootView()
+                .environmentObject(appDelegate.secrets)
         }
         .defaultSize(width: 760, height: 580)
         .commands { CommandGroup(replacing: .newItem) {} }
@@ -31,11 +34,13 @@ enum Filter: String, CaseIterable, Identifiable {
 }
 
 struct ContentView: View {
+    @EnvironmentObject private var secrets: SecretSession
     @State private var items: [KItem] = []
     @State private var search = ""
     @State private var filter: Filter = .all
-    @State private var revealed: [UUID: String] = [:]      // id -> plaintext (in memory only)
-    @State private var busy: Set<UUID> = []
+    @State private var loading = true
+    @State private var loadError: String?
+    @State private var loadID = UUID()
     @State private var showAdd = false
     @State private var alert: String?
     @State private var toast: String?
@@ -58,9 +63,15 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if filtered.isEmpty {
+            if let loadError {
                 Spacer()
-                Text(items.isEmpty ? "Loading…" : "Nothing matches.")
+                Text("Couldn’t load passwords").font(.headline)
+                Text(loadError).foregroundStyle(.secondary).padding(.horizontal)
+                Button("Try Again", action: load).padding(.top, 8)
+                Spacer()
+            } else if filtered.isEmpty {
+                Spacer()
+                Text(items.isEmpty ? (loading ? "Loading…" : "No passwords found.") : "Nothing matches.")
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
@@ -71,14 +82,9 @@ struct ContentView: View {
         .frame(minWidth: 620, minHeight: 420)
         .overlay(alignment: .bottom) { toastView }
         .onAppear(perform: load)
+        .onDisappear { secrets.clear() }
         .sheet(isPresented: $showAdd) {
-            AddSheet { service, account, password, note in
-                do {
-                    try Keychain.addGeneric(service: service, account: account,
-                                            password: password, note: note)
-                    flash("Saved"); load()
-                } catch { alert = error.localizedDescription }
-            }
+            AddSheet { flash("Saved"); load() }
         }
         .alert("Couldn’t complete that",
                isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
@@ -115,6 +121,7 @@ struct ContentView: View {
 
             Button(action: load) { Image(systemName: "arrow.clockwise") }
                 .help("Reload")
+                .disabled(loading)
             Button { showAdd = true } label: { Label("Add", systemImage: "plus") }
                 .keyboardShortcut("n")
         }
@@ -131,10 +138,9 @@ struct ContentView: View {
                     .fontWeight(.medium).lineLimit(1)
                 Text(item.account.isEmpty ? "—" : item.account)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if let pw = revealed[item.id] {
+                if let pw = secrets.revealed[item.id] {
                     Text(pw.isEmpty ? "(empty)" : pw)
                         .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                         .padding(.top, 2)
@@ -147,9 +153,10 @@ struct ContentView: View {
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(.quaternary, in: Capsule())
 
-            if busy.contains(item.id) {
+            if secrets.isBusy(item.id) {
                 ProgressView().controlSize(.small).frame(width: 62)
-            } else if let pw = revealed[item.id] {
+            } else if let pw = secrets.revealed[item.id] {
+                Button("Hide") { secrets.hide(item.id) }.help("Hide this password")
                 Button("Copy") { copy(pw) }.frame(width: 62)
             } else {
                 Button("Reveal") { reveal(item) }.frame(width: 62)
@@ -182,41 +189,38 @@ struct ContentView: View {
     // MARK: - Actions
 
     private func load() {
+        secrets.clear()
+        loading = true
+        loadError = nil
+        let request = UUID()
+        loadID = request
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Keychain.list()
-            DispatchQueue.main.async { items = result }
-        }
-    }
-
-    private func reveal(_ item: KItem) {
-        if revealed[item.id] != nil { revealed[item.id] = nil; return }
-        busy.insert(item.id)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let outcome = Result { try Keychain.reveal(item) }
+            let result = Result { try Keychain.list() }
             DispatchQueue.main.async {
-                busy.remove(item.id)
-                switch outcome {
-                case .success(let pw): revealed[item.id] = pw
-                case .failure(let e):  alert = e.localizedDescription
+                guard loadID == request else { return }
+                loading = false
+                switch result {
+                case .success(let loaded): items = loaded
+                case .failure(let error): items = []; loadError = error.localizedDescription
                 }
             }
         }
     }
 
-    private func copy(_ pw: String) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(pw, forType: .string)
-        // Marks the item so well-behaved clipboard managers don't record it.
-        pb.setString(pw, forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-        let stamp = pb.changeCount
-        flash("Copied — clears in 60s")
-        // Auto-clear after 60s, but only if nothing else has since taken the clipboard.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
-            if NSPasteboard.general.changeCount == stamp {
-                NSPasteboard.general.clearContents()
+    private func reveal(_ item: KItem) {
+        let token = secrets.beginReveal(for: item.id)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = Result { try Keychain.reveal(item) }
+            DispatchQueue.main.async {
+                guard secrets.finishReveal(for: item.id, token: token, result: outcome) else { return }
+                if case .failure(let error) = outcome { alert = error.localizedDescription }
             }
         }
+    }
+
+    private func copy(_ pw: String) {
+        SecretClipboard.shared.copy(pw)
+        flash("Copied — clears in 60s")
     }
 
     private func flash(_ msg: String) {
@@ -231,17 +235,29 @@ struct ContentView: View {
 // MARK: - Add sheet
 
 struct AddSheet: View {
-    var onSave: (_ service: String, _ account: String, _ password: String, _ note: String) -> Void
+    var onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var service = ""
     @State private var account = ""
     @State private var password = ""
     @State private var note = ""
+    @State private var saving = false
+    @State private var saveAlert: SaveAlert?
+
+    private enum SaveAlert {
+        case replace(KItem), error(String)
+        var title: String {
+            switch self {
+            case .replace: return "Replace saved password?"
+            case .error: return "Couldn’t save password"
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Add password").font(.title3).fontWeight(.semibold)
-            Text("Creates a generic password in your login keychain (updates it if the service + account already exist).")
+            Text("Creates a generic password in your default keychain. You’ll be asked before replacing an existing password.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
             field("Service", "e.g. My API", $service)
@@ -265,12 +281,7 @@ struct AddSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    onSave(service.trimmingCharacters(in: .whitespaces),
-                           account.trimmingCharacters(in: .whitespaces),
-                           password, note.trimmingCharacters(in: .whitespaces))
-                    dismiss()
-                }
+                Button(saving ? "Saving…" : "Save") { save() }
                 .keyboardShortcut(.defaultAction)
                 .disabled(service.trimmingCharacters(in: .whitespaces).isEmpty
                           || account.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -278,6 +289,57 @@ struct AddSheet: View {
         }
         .padding(20)
         .frame(width: 380)
+        .disabled(saving)
+        .interactiveDismissDisabled(saving)
+        .onDisappear { password = "" }
+        .alert(saveAlert?.title ?? "",
+               isPresented: Binding(get: { saveAlert != nil }, set: { if !$0 { saveAlert = nil } }),
+               presenting: saveAlert) { kind in
+            switch kind {
+            case .replace(let item):
+                Button("Cancel", role: .cancel) { }
+                Button("Replace", role: .destructive) { save(replacing: item) }
+            case .error:
+                Button("OK", role: .cancel) { }
+            }
+        } message: { kind in
+            switch kind {
+            case .replace(let item):
+                Text("A password already exists for \(item.service) / \(item.account). Replace its saved value? This can’t be undone.")
+            case .error(let message):
+                Text(message)
+            }
+        }
+    }
+
+    private func save(replacing item: KItem? = nil) {
+        let service = service.trimmingCharacters(in: .whitespaces)
+        let account = account.trimmingCharacters(in: .whitespaces)
+        let password = password
+        let note = note.trimmingCharacters(in: .whitespaces)
+        saving = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = Result {
+                if let item {
+                    try Keychain.replaceGeneric(item, password: password, note: note)
+                } else {
+                    try Keychain.addGeneric(service: service, account: account, password: password, note: note)
+                }
+            }
+            DispatchQueue.main.async {
+                saving = false
+                switch outcome {
+                case .success:
+                    self.password = ""
+                    onSaved()
+                    dismiss()
+                case .failure(KError.duplicateItem(let existing)):
+                    saveAlert = .replace(existing)
+                case .failure(let error):
+                    saveAlert = .error(error.localizedDescription)
+                }
+            }
+        }
     }
 
     @ViewBuilder

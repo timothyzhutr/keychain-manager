@@ -14,46 +14,45 @@ struct KItem: Identifiable, Hashable {
 
 enum KError: Error, LocalizedError {
     case status(OSStatus)
+    case duplicateItem(KItem)
+    case invalidResult
     var errorDescription: String? {
-        guard case let .status(s) = self else { return nil }
-        switch s {
-        case errSecUserCanceled: return "Authorization was canceled."
-        case errSecItemNotFound: return "Item not found."
-        case errSecAuthFailed:   return "Authorization failed."
-        default:
-            return (SecCopyErrorMessageString(s, nil) as String?) ?? "Keychain error \(s)"
+        switch self {
+        case .duplicateItem: return "A password already exists for this service and account."
+        case .invalidResult: return "The keychain returned an unexpected result."
+        case .status(let s):
+            switch s {
+            case errSecUserCanceled: return "Authorization was canceled."
+            case errSecItemNotFound: return "Item not found."
+            case errSecAuthFailed:   return "Authorization failed."
+            default:
+                return (SecCopyErrorMessageString(s, nil) as String?) ?? "Keychain error \(s)"
+            }
         }
     }
 }
 
-/// Thin wrapper over the Security framework operating on the file-based login keychain.
+/// Security framework wrapper for file-based keychains in the user's search list.
 enum Keychain {
 
-    static func list() -> [KItem] {
+    static func list(in keychain: SecKeychain? = nil,
+                     copyMatching: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemCopyMatching) throws -> [KItem] {
         var items: [KItem] = []
         for isInternet in [false, true] {
-            let query: [String: Any] = [
+            var query: [String: Any] = [
                 kSecClass as String: isInternet ? kSecClassInternetPassword : kSecClassGenericPassword,
                 kSecReturnAttributes as String: true,
                 kSecReturnPersistentRef as String: true,
                 kSecMatchLimit as String: kSecMatchLimitAll,
             ]
+            if let keychain { query[kSecMatchSearchList as String] = [keychain] }
             var result: CFTypeRef?
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            guard status == errSecSuccess, let arr = result as? [[String: Any]] else { continue }
+            let status = copyMatching(query as CFDictionary, &result)
+            if status == errSecItemNotFound { continue }
+            guard status == errSecSuccess else { throw KError.status(status) }
+            guard let arr = result as? [[String: Any]] else { throw KError.invalidResult }
             for d in arr {
-                guard let persistentRef = d[kSecValuePersistentRef as String] as? Data else {
-                    continue
-                }
-                let account = d[kSecAttrAccount as String] as? String ?? ""
-                let service = (isInternet
-                    ? d[kSecAttrServer as String] as? String
-                    : d[kSecAttrService as String] as? String) ?? ""
-                let label = d[kSecAttrLabel as String] as? String
-                    ?? (service.isEmpty ? account : service)
-                items.append(KItem(persistentRef: persistentRef,
-                                   isInternet: isInternet, service: service,
-                                   account: account, label: label))
+                items.append(try item(from: d, isInternet: isInternet))
             }
         }
         return items.sorted {
@@ -69,9 +68,8 @@ enum Keychain {
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
-            throw KError.status(status)
-        }
+        guard status == errSecSuccess else { throw KError.status(status) }
+        guard let data = result as? Data else { throw KError.invalidResult }
         return String(data: data, encoding: .utf8) ?? "(binary, \(data.count) bytes)"
     }
 
@@ -83,10 +81,22 @@ enum Keychain {
         ]
     }
 
-    /// Adds a generic password; updates in place if service+account already exist.
+    /// Creates a generic password. Duplicates return the exact item for confirmation;
+    /// creating a password never changes an existing secret.
     static func addGeneric(service: String, account: String,
-                           password: String, note: String) throws {
+                           password: String, note: String, in keychain: SecKeychain? = nil) throws {
+        let target: SecKeychain
+        if let keychain {
+            target = keychain
+        } else {
+            var defaultKeychain: SecKeychain?
+            let status = SecKeychainCopyDefault(&defaultKeychain)
+            guard status == errSecSuccess else { throw KError.status(status) }
+            guard let defaultKeychain else { throw KError.invalidResult }
+            target = defaultKeychain
+        }
         var attrs: [String: Any] = [
+            kSecUseKeychain as String: target,
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
@@ -100,14 +110,43 @@ enum Keychain {
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
                 kSecAttrAccount as String: account,
+                kSecMatchSearchList as String: [target],
+                kSecReturnAttributes as String: true,
+                kSecReturnPersistentRef as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
             ]
-            var update: [String: Any] = [kSecValueData as String: Data(password.utf8)]
-            if !note.isEmpty { update[kSecAttrDescription as String] = note }
-            let us = SecItemUpdate(match as CFDictionary, update as CFDictionary)
-            if us != errSecSuccess { throw KError.status(us) }
+            var result: CFTypeRef?
+            let lookupStatus = SecItemCopyMatching(match as CFDictionary, &result)
+            guard lookupStatus == errSecSuccess else { throw KError.status(lookupStatus) }
+            guard let attributes = result as? [String: Any] else { throw KError.invalidResult }
+            throw KError.duplicateItem(try item(from: attributes, isInternet: false))
         } else if status != errSecSuccess {
             throw KError.status(status)
         }
+    }
+
+    static func replaceGeneric(_ item: KItem, password: String, note: String) throws {
+        guard !item.isInternet else { throw KError.invalidResult }
+        let match = [kSecValuePersistentRef as String: item.persistentRef]
+        let update: [String: Any] = [
+            kSecValueData as String: Data(password.utf8),
+            kSecAttrDescription as String: note,
+        ]
+        let status = SecItemUpdate(match as CFDictionary, update as CFDictionary)
+        guard status == errSecSuccess else { throw KError.status(status) }
+    }
+
+    private static func item(from attributes: [String: Any], isInternet: Bool) throws -> KItem {
+        guard let reference = attributes[kSecValuePersistentRef as String] as? Data else {
+            throw KError.invalidResult
+        }
+        let account = attributes[kSecAttrAccount as String] as? String ?? ""
+        let serviceKey = isInternet ? kSecAttrServer : kSecAttrService
+        let service = attributes[serviceKey as String] as? String ?? ""
+        let label = attributes[kSecAttrLabel as String] as? String
+            ?? (service.isEmpty ? account : service)
+        return KItem(persistentRef: reference, isInternet: isInternet,
+                     service: service, account: account, label: label)
     }
 
     static func delete(_ item: KItem) throws {

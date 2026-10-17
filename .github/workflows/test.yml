@@ -1,0 +1,17 @@
+name: Test macOS app
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run keychain, lifecycle, and packaged bundle tests
+        run: ./scripts/test.sh
