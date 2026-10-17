@@ -13,6 +13,19 @@ swiftc -swift-version 5 \
 
 swiftc -swift-version 5 \
     "$repo_root/src/Keychain.swift" \
+    "$repo_root/tests/KeychainFailureTests.swift" \
+    -o "$test_root/KeychainFailureTests"
+"$test_root/KeychainFailureTests"
+
+swiftc -swift-version 5 \
+    "$repo_root/src/Secrets.swift" \
+    "$repo_root/src/Lifecycle.swift" \
+    "$repo_root/tests/SecretLifecycleTests.swift" \
+    -o "$test_root/SecretLifecycleTests"
+"$test_root/SecretLifecycleTests"
+
+swiftc -swift-version 5 \
+    "$repo_root/src/Keychain.swift" \
     "$repo_root/tests/PersistentRefIntegrationTests.swift" \
     -o "$test_root/PersistentRefIntegrationTests"
 "$test_root/PersistentRefIntegrationTests"

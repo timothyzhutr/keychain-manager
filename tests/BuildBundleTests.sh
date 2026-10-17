@@ -5,9 +5,13 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/keychain-manager-build-test.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT
 
-"$repo_root/scripts/build.sh" "$test_root"
+"$repo_root/scripts/package.sh" "$test_root"
+archive="$(find "$test_root" -maxdepth 1 -name '*.zip' -print)"
+test -n "$archive"
+(cd "$test_root" && shasum -a 256 -c "$(basename "$archive").sha256")
+ditto -x -k "$archive" "$test_root/extracted"
 
-app="$test_root/Keychain Manager.app"
+app="$test_root/extracted/Keychain Manager.app"
 binary="$app/Contents/MacOS/KeychainManager"
 plist="$app/Contents/Info.plist"
 

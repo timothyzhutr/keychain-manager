@@ -27,6 +27,35 @@ struct PersistentRefIntegrationTests {
         guard createStatus == errSecSuccess, let keychain else {
             throw IntegrationTestError.failed("create temporary keychain", createStatus)
         }
+        defer { SecKeychainDelete(keychain) }
+
+        try Keychain.addGeneric(service: "overwrite-test.invalid", account: "alice",
+                                password: "original", note: "original note", in: keychain)
+        let genericBefore = try Keychain.list(in: keychain).first { !$0.isInternet }!
+        let confirmedItem: KItem
+        do {
+            try Keychain.addGeneric(service: "overwrite-test.invalid", account: "alice",
+                                    password: "replacement", note: "replacement note", in: keychain)
+            throw IntegrationTestError.invalidResult("duplicate add overwrote an existing password")
+        } catch KError.duplicateItem(let item) {
+            confirmedItem = item
+        }
+        guard try Keychain.reveal(genericBefore) == "original" else {
+            throw IntegrationTestError.invalidResult("duplicate add changed the saved password")
+        }
+        guard confirmedItem.persistentRef == genericBefore.persistentRef else {
+            throw IntegrationTestError.invalidResult("confirmation did not target the existing item")
+        }
+        try Keychain.replaceGeneric(confirmedItem, password: "replacement", note: "replacement note")
+        guard try Keychain.reveal(genericBefore) == "replacement" else {
+            throw IntegrationTestError.invalidResult("confirmed replacement did not update the item")
+        }
+        // Confirmation cannot recreate a deleted item or update a different matching item.
+        try Keychain.delete(confirmedItem)
+        do {
+            try Keychain.replaceGeneric(confirmedItem, password: "unexpected", note: "")
+            throw IntegrationTestError.invalidResult("replacement unexpectedly recreated a deleted item")
+        } catch KError.status(let status) where status == errSecItemNotFound { }
 
         try addInternetPassword(port: 80, secret: "first", to: keychain)
         try addInternetPassword(port: 443, secret: "second", to: keychain)

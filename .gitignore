@@ -3,6 +3,7 @@ Keychain Manager.app/
 *.icns
 *.iconset/
 build/
+dist/
 
 # macOS
 .DS_Store
