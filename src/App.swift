@@ -45,6 +45,7 @@ struct ContentView: View {
     @State private var alert: String?
     @State private var toast: String?
     @State private var pendingDelete: KItem?
+    @State private var pendingUpdate: KItem?
 
     private var filtered: [KItem] {
         items.filter { it in
@@ -85,6 +86,9 @@ struct ContentView: View {
         .onDisappear { secrets.clear() }
         .sheet(isPresented: $showAdd) {
             AddSheet { flash("Saved"); load() }
+        }
+        .sheet(item: $pendingUpdate) { item in
+            UpdateSheet(item: item) { flash("Updated"); load() }
         }
         .alert("Couldn’t complete that",
                isPresented: Binding(get: { alert != nil }, set: { if !$0 { alert = nil } })) {
@@ -161,6 +165,12 @@ struct ContentView: View {
             } else {
                 Button("Reveal") { reveal(item) }.frame(width: 62)
             }
+
+            Button("Update") {
+                secrets.hide(item.id)
+                pendingUpdate = item
+            }
+            .help("Update this password or token")
 
             Button(role: .destructive) { pendingDelete = item } label: {
                 Image(systemName: "trash")
@@ -347,6 +357,83 @@ struct AddSheet: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             TextField(placeholder, text: text).textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+// MARK: - Update sheet
+
+struct UpdateSheet: View {
+    let item: KItem
+    var onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var password = ""
+    @State private var saving = false
+    @State private var saveError: String?
+    @FocusState private var passwordFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Update password or token").font(.title3).fontWeight(.semibold)
+            Text("Enter the new value for this item. Its name, account, and other settings stay the same.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.service.isEmpty ? item.label : item.service)
+                    .fontWeight(.medium).textSelection(.enabled)
+                Text(item.account.isEmpty ? "—" : item.account)
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(item.kindLabel.capitalized + " password")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New password / token").font(.caption).foregroundStyle(.secondary)
+                SecureField("new secret value", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($passwordFocused)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(saving ? "Updating…" : "Update") { save() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(password.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .disabled(saving)
+        .interactiveDismissDisabled(saving)
+        .onAppear { passwordFocused = true }
+        .onDisappear { password = "" }
+        .alert("Couldn’t update password",
+               isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("OK", role: .cancel) { }
+        } message: { Text(saveError ?? "") }
+    }
+
+    private func save() {
+        let password = password
+        saving = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = Result { try Keychain.updatePassword(item, password: password) }
+            DispatchQueue.main.async {
+                saving = false
+                switch outcome {
+                case .success:
+                    self.password = ""
+                    onSaved()
+                    dismiss()
+                case .failure(let error):
+                    saveError = error.localizedDescription
+                }
+            }
         }
     }
 }

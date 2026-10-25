@@ -12,6 +12,7 @@ A tiny, native macOS app for browsing and editing your file-based keychains — 
 - **Reveal** a secret on demand, with **Hide** and a 60-second reveal timeout
 - **Copy** a revealed password; clipboard auto-clears after 60s or on normal app quit, unless another copy has changed it
 - **Add** a generic password to your default keychain; replacing an existing service/account requires explicit confirmation
+- **Update** a password or token in place, keeping its name, account, notes, and access settings
 - **Delete** with type-the-name confirmation
 
 **launchd tab**
@@ -45,7 +46,7 @@ Run the regression and bundle checks with:
 ./scripts/test.sh
 ```
 
-Tests use a temporary keychain and a private clipboard, not your saved passwords or current clipboard. They cover exact item targeting, duplicate protection and confirmed replacement, list failures, reveal expiry and stale results, clipboard ownership and cleanup, and the extracted universal app bundle. GitHub Actions runs the same checks on macOS.
+Tests use a temporary keychain and a private clipboard, not your saved passwords or current clipboard. They cover exact item targeting, duplicate protection and confirmed replacement, generic and internet password updates with metadata preservation, list failures, reveal expiry and stale results, clipboard ownership and cleanup, and the extracted universal app bundle. GitHub Actions runs the same checks on macOS.
 
 ## Share with friends
 
@@ -59,6 +60,8 @@ The package uses the same local ad-hoc signature as a source build. It is not De
 
 **Using it:** choose **Reveal** only for an item you need, then **Copy** or **Hide**. Reveals expire after 60 seconds. The clipboard remains available when you switch apps to paste, and clears on its own timer. **Save** creates a password; if it already exists, **Cancel** preserves the original and **Replace** changes exactly that item. A failed save keeps the form open for retry. Deletion requires typing the displayed name and is permanent.
 
+To rotate a saved password or API token, choose **Update** on its row, paste the new value, and choose **Update** again. The current secret is never loaded into the form. This changes only the selected item's saved value; it preserves its name, account, notes, and access settings. Cancel leaves the item unchanged, and a failed update keeps the form open for retry. Updating the keychain does not change a password or issue a token at the original service—obtain the new value there first.
+
 ## Icon
 
 `tools/icongen.swift` renders the full icon set with Core Graphics:
@@ -71,7 +74,7 @@ iconutil -c icns /tmp/AppIcon.iconset -o "build/Keychain Manager.app/Contents/Re
 
 ## Layout
 
-- `src/Keychain.swift` — Security-framework wrapper (list / reveal / add / delete)
+- `src/Keychain.swift` — Security-framework wrapper (list / reveal / add / update / delete)
 - `src/App.swift` — SwiftUI UI (tabbed shell + Keychain tab)
 - `src/Launchd.swift` — launchd tab (`launchctl list`, read-only)
 - `src/Secrets.swift` — reveal lifecycle and clipboard ownership/expiry

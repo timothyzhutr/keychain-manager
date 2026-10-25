@@ -50,12 +50,32 @@ struct PersistentRefIntegrationTests {
         guard try Keychain.reveal(genericBefore) == "replacement" else {
             throw IntegrationTestError.invalidResult("confirmed replacement did not update the item")
         }
+        let genericAttributes = try attributes(for: confirmedItem)
+        let newToken = "  rotated-token-🔑\n"
+        try Keychain.updatePassword(confirmedItem, password: newToken)
+        guard try Keychain.reveal(genericBefore) == newToken else {
+            throw IntegrationTestError.invalidResult("generic update did not preserve the exact new value")
+        }
+        try assertMetadataUnchanged(for: confirmedItem, before: genericAttributes)
+        guard try Keychain.list(in: keychain).first?.persistentRef == genericBefore.persistentRef else {
+            throw IntegrationTestError.invalidResult("generic update recreated the item")
+        }
         // Confirmation cannot recreate a deleted item or update a different matching item.
         try Keychain.delete(confirmedItem)
         do {
             try Keychain.replaceGeneric(confirmedItem, password: "unexpected", note: "")
             throw IntegrationTestError.invalidResult("replacement unexpectedly recreated a deleted item")
         } catch KError.status(let status) where status == errSecItemNotFound { }
+
+        // Updating a missing item must fail without recreating it. File-based keychain
+        // references can be reused if another item is later added with identical attributes.
+        do {
+            try Keychain.updatePassword(confirmedItem, password: "unexpected")
+            throw IntegrationTestError.invalidResult("update unexpectedly recreated a deleted item")
+        } catch KError.status(let status) where status == errSecItemNotFound { }
+        guard try Keychain.list(in: keychain).isEmpty else {
+            throw IntegrationTestError.invalidResult("failed update created a new item")
+        }
 
         try addInternetPassword(port: 80, secret: "first", to: keychain)
         try addInternetPassword(port: 443, secret: "second", to: keychain)
@@ -70,6 +90,19 @@ struct PersistentRefIntegrationTests {
             throw IntegrationTestError.invalidResult("revealed unexpected test data")
         }
 
+        let internetAttributes = try attributes(for: before[0])
+        let otherSecret = try Keychain.reveal(before[1])
+        try Keychain.updatePassword(before[0], password: "rotated-internet-password")
+        guard try Keychain.reveal(before[0]) == "rotated-internet-password",
+              try Keychain.reveal(before[1]) == otherSecret else {
+            throw IntegrationTestError.invalidResult("internet update did not change exactly one item")
+        }
+        try assertMetadataUnchanged(for: before[0], before: internetAttributes)
+        let updated = try items(in: keychain)
+        guard Set(updated.map(\.persistentRef)) == Set(before.map(\.persistentRef)) else {
+            throw IntegrationTestError.invalidResult("internet update recreated an item")
+        }
+
         try Keychain.delete(before[0])
         let after = try items(in: keychain)
         guard after.count == 1 else {
@@ -78,6 +111,27 @@ struct PersistentRefIntegrationTests {
         }
 
         print("PersistentRefIntegrationTests passed")
+    }
+
+    private static func attributes(for item: KItem) throws -> [String: Any] {
+        let query: [String: Any] = [
+            kSecValuePersistentRef as String: item.persistentRef,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, var attributes = result as? [String: Any] else {
+            throw IntegrationTestError.failed("read item metadata", status)
+        }
+        attributes.removeValue(forKey: kSecAttrModificationDate as String)
+        return attributes
+    }
+
+    private static func assertMetadataUnchanged(for item: KItem, before: [String: Any]) throws {
+        guard NSDictionary(dictionary: before).isEqual(to: try attributes(for: item)) else {
+            throw IntegrationTestError.invalidResult("updating the password changed item metadata")
+        }
     }
 
     private static func addInternetPassword(

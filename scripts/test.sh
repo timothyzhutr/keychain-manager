@@ -18,6 +18,12 @@ swiftc -swift-version 5 \
 "$test_root/KeychainFailureTests"
 
 swiftc -swift-version 5 \
+    "$repo_root/src/Keychain.swift" \
+    "$repo_root/tests/KeychainUpdateTests.swift" \
+    -o "$test_root/KeychainUpdateTests"
+"$test_root/KeychainUpdateTests"
+
+swiftc -swift-version 5 \
     "$repo_root/src/Secrets.swift" \
     "$repo_root/src/Lifecycle.swift" \
     "$repo_root/tests/SecretLifecycleTests.swift" \

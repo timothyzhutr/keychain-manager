@@ -136,6 +136,16 @@ enum Keychain {
         guard status == errSecSuccess else { throw KError.status(status) }
     }
 
+    /// Changes only the secret of this exact item, preserving its identity and metadata.
+    /// A missing item is an error; updating never deletes or creates a password.
+    static func updatePassword(_ item: KItem, password: String,
+                               update: (CFDictionary, CFDictionary) -> OSStatus = SecItemUpdate) throws {
+        let match = [kSecValuePersistentRef as String: item.persistentRef]
+        let changes = [kSecValueData as String: Data(password.utf8)]
+        let status = update(match as CFDictionary, changes as CFDictionary)
+        guard status == errSecSuccess else { throw KError.status(status) }
+    }
+
     private static func item(from attributes: [String: Any], isInternet: Bool) throws -> KItem {
         guard let reference = attributes[kSecValuePersistentRef as String] as? Data else {
             throw KError.invalidResult
