@@ -39,6 +39,11 @@ directory as the first argument if needed. The script targets macOS 13+, builds
 both architectures, generates the icon, and applies a local ad-hoc signature so
 "Always Allow" keychain grants persist until the app is rebuilt.
 
+Some Command Line Tools releases (for example 27.0) ship a macOS SDK that
+needs a SwiftUI compiler plugin only Xcode provides. When the default SDK
+can't build the app, the script switches to the newest installed SDK that can
+and prints which one it used. Set `SDKROOT` to choose the SDK yourself.
+
 Run the regression and bundle checks with:
 
 ```bash
